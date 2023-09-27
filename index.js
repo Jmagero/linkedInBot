@@ -1,4 +1,6 @@
 const puppeteer = require("puppeteer");
+const fs = require('fs');
+const createCsvWriter = require('csv-writer').createObjectCsvWriter;
 const data = require("./config.json");
 const BaseURL = data.baseURL;
 const email = data.email;
@@ -13,6 +15,7 @@ const numberOfPagination = data.numberOfPagination;
 const nbrOfOffersPerPage = data.numberOfOffersPerPage;
 let page = "";
 let browser = "";
+let csvWriter = null;
 
 async function logs() {
   console.log("mydata is :" + JSON.stringify(data));
@@ -39,6 +42,15 @@ async function initiliazer() {
     await pages[0].close();
   }
   await page.goto(BaseURL);
+
+  csvWriter = createCsvWriter({
+    path: 'report.csv', 
+    header: [         
+      {id: 'jobTitle', title: 'Job Title'},
+      {id: 'link', title: 'Link'},
+      {id: 'status', title:'Status'}
+    ],
+  });
 }
 
 async function findTargetAndType(target, value) {
@@ -109,11 +121,13 @@ async function clickElement(selector) {
 }
 
 async function Scrolling() {
+  console.log("Scrolling.....");
   try {
     await page.evaluate(() => {
       const element = document.querySelector(
-        'div[class="scaffold-layout__list-detail-inner"]>section>div>ul'
+        'div.scaffold-layout__list > div > ul'
       );
+      console.log("element: "+ element);
       if (element) {
         element.scrollIntoView();
       } else {
@@ -135,8 +149,17 @@ function changeValue(input, value) {
   input.dispatchEvent(inputEvent);
 }
 
+function writeInCSV(data){
+  csvWriter.writeRecords([data]) // Write data to CSV
+  .then(() => {
+    console.log('CSV file written successfully');
+  }).catch((error) => {
+    console.error('Error writing new entry:', error);
+  });
+}
+
 async function getJobTitle() {
-  const jobTitleSelector = '.job-details-jobs-unified-top-card__job-title';
+  const jobTitleSelector = ".job-details-jobs-unified-top-card__job-title";
 
   const jobTitle = await page.evaluate((selector) => {
     const element = document.querySelector(selector);
@@ -146,6 +169,16 @@ async function getJobTitle() {
   return jobTitle;
 }
 
+async function getLink() {
+  const jobLinkSelector = ".job-details-jobs-unified-top-card__job-title";
+
+  const jobLink = await page.evaluate((selector) => {
+    const element = document.querySelector(selector);
+    return element ? element.parentElement.getAttribute("href") : null;
+  }, jobLinkSelector);
+
+  return jobLink;
+}
 
 async function FillAndApply() {
   let i = 1;
@@ -155,14 +188,16 @@ async function FillAndApply() {
 
     for (let index = 1; index <= nbrOfOffersPerPage; index++) {
       // Get the job title
-      const jobTitle = await getJobTitle();
+      let jobTitle = await getJobTitle();
+      console.log("jobTitle: " + jobTitle);
+      let jobLink = await getLink();
+      console.log("jobLink: https://www.linkedin.com" + jobLink);
 
-      console.log("jobTitle: "+ jobTitle);
-      
 
       // Check if the job title is in the list of titles to avoid
       if (data.avoidJobTitles.includes(jobTitle)) {
         console.log(`Skipping job with title: ${jobTitle}`);
+        // await Scrolling();
         continue; // Skip this job and continue to the next one
       }
 
@@ -170,13 +205,21 @@ async function FillAndApply() {
       await page.waitForTimeout(3000);
       await Scrolling();
       console.log(`Apply N°[${index}]`);
-      await buttonClick(
-        `li[class*="jobs-search-results__list-item"]:nth-child(${index})>div>div>div>div+div>div`
-      );
+      if (
+        (await page.$(
+          `li[class*="jobs-search-results__list-item"]:nth-child(${index})>div>div>div>div+div>div`
+        )) != null
+      ) {
+        await buttonClick(
+          `li[class*="jobs-search-results__list-item"]:nth-child(${index})>div>div>div>div+div>div`
+        );
+      }
       if (index === nbrOfOffersPerPage) lastIndexForPagination++;
 
       await page.waitForTimeout(2000);
+      //Check for application button
       if ((await page.$("div:nth-child(4) > div > div > div>button")) != null) {
+        console.log("Applying....")
         await clickElement("div:nth-child(4) > div > div > div>button");
         while (state == true) {
           await page.waitForTimeout(2000);
@@ -212,7 +255,6 @@ async function FillAndApply() {
             await page.evaluate(() => {
               const divElem = document.querySelector("div.pb4");
               const inputElements = divElem.querySelectorAll("input");
-              console.log("inputElements: " + inputElements);
               let value = 3;
               var nativeInputValueSetter = Object.getOwnPropertyDescriptor(
                 window.HTMLInputElement.prototype,
@@ -226,7 +268,7 @@ async function FillAndApply() {
               }
             });
           }
-          let i = 0;
+          let counter = 0;
           do {
             await page.waitForTimeout(4000);
             if (
@@ -234,8 +276,8 @@ async function FillAndApply() {
                 'div[class*="artdeco-modal-overlay"]>div>div+div+div>button>span'
               ))
             ) {
-              i++;
-              console.log("counter: " + i);
+              counter++;
+              console.log("counter: " + counter);
               await page.evaluate(() => {
                 setTimeout(() => {}, 3000);
                 document
@@ -244,27 +286,43 @@ async function FillAndApply() {
                   )
                   .click();
               });
-            } else i = -2;
-          } while (i >= 0 && i < 5);
+            } else counter = -2;
+          } while (counter >= 0 && counter < 5);
 
-          if (i >= 5) {
+          let skipped = false;
+          if (counter >= 5) {
             await buttonClick(
               ".artdeco-modal__dismiss.artdeco-button.artdeco-button--circle.artdeco-button--muted.artdeco-button--2.artdeco-button--tertiary.ember-view"
             );
+            await page.waitForTimeout(4000);
+            await buttonClick(
+              '[data-control-name="discard_application_confirm_btn"]'
+            );
+            skipped = true;
             console.log("Job Skipped");
+          } else {
+            await page.waitForTimeout(4000);
+            await page.evaluate(() => {
+              setTimeout(() => {}, 3000);
+              document
+                .querySelector(
+                  ".artdeco-modal__dismiss.artdeco-button.artdeco-button--circle.artdeco-button--muted.artdeco-button--2.artdeco-button--tertiary.ember-view"
+                )
+                .click();
+            });
           }
-          await page.waitForTimeout(4000);
-          await page.evaluate(() => {
-            setTimeout(() => {}, 3000);
-            document
-              .querySelector(
-                '.artdeco-modal__dismiss.artdeco-button.artdeco-button--circle.artdeco-button--muted.artdeco-button--2.artdeco-button--tertiary.ember-view'
-              )
-              .click();
-          });
+
+          //Write in csv
+          writeInCSV({
+            jobTitle: jobTitle,
+            link: "https://www.linkedin.com"+jobLink,
+            status: skipped ? "Skipped" : "Applied"
+          })
         }
       }
     }
+    
+    await Scrolling();
     await buttonClick(
       `ul[class="artdeco-pagination__pages artdeco-pagination__pages--number"]>li:nth-child(${lastIndexForPagination})`
     );
@@ -275,7 +333,7 @@ async function FillAndApply() {
 
 async function jobsApply() {
   await buttonClick("#global-nav > div > nav > ul > li:nth-child(3)");
-  await waitForSelectorAndType('[id^="jobs-search-box-keyword-id"]', keyword);
+  await waitForSelectorAndType('[id^="jobs-search-box-keyword-id"]', keyword.join(" OR "));
   await waitForSelectorAndType('[id^="jobs-search-box-location-id"]', location);
   await page.waitForTimeout(1000);
   await page.keyboard.press("Enter");
