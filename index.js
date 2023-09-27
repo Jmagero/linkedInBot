@@ -187,19 +187,7 @@ async function FillAndApply() {
     console.log("Scrolling the page N°" + i);
 
     for (let index = 1; index <= nbrOfOffersPerPage; index++) {
-      // Get the job title
-      let jobTitle = await getJobTitle();
-      console.log("jobTitle: " + jobTitle);
-      let jobLink = await getLink();
-      console.log("jobLink: https://www.linkedin.com" + jobLink);
-
-
-      // Check if the job title is in the list of titles to avoid
-      if (data.avoidJobTitles.includes(jobTitle)) {
-        console.log(`Skipping job with title: ${jobTitle}`);
-        // await Scrolling();
-        continue; // Skip this job and continue to the next one
-      }
+      
 
       let state = true;
       await page.waitForTimeout(3000);
@@ -219,6 +207,19 @@ async function FillAndApply() {
       await page.waitForTimeout(2000);
       //Check for application button
       if ((await page.$("div:nth-child(4) > div > div > div>button")) != null) {
+        // Get the job title
+          let jobTitle = await getJobTitle();
+          console.log("jobTitle: " + jobTitle);
+          let jobLink = await getLink();
+          console.log("jobLink: https://www.linkedin.com" + jobLink);
+
+
+          // Check if the job title is in the list of titles to avoid
+          if (data.avoidJobTitles.includes(jobTitle)) {
+            console.log(`Skipping job with title: ${jobTitle}`);
+            // await Scrolling();
+            continue; // Skip this job and continue to the next one
+          }
         console.log("Applying....")
         await clickElement("div:nth-child(4) > div > div > div>button");
         while (state == true) {
@@ -339,9 +340,6 @@ async function jobsApply() {
   await page.keyboard.press("Enter");
   await jobCriteriaByTime();
   await page.waitForTimeout(3000);
-  // await jobCriteriaByType();
-  // await page.waitForTimeout(2000);
-
   await FillAndApply();
 }
 
